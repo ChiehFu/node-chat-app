@@ -1,17 +1,66 @@
-const msgFrom = document.querySelector('#message-form');
-const sendMsg = document.querySelector('input');
+const socket = io();
 
-let socket = io();
+// Elements 
+const $messageForm = document.querySelector('#message-form');
+const $messageFormInput = $messageForm.querySelector('input');
+const $messageFormButton = $messageForm.querySelector('button');
+const $sendLocationButton = document.querySelector('#send-location');
+const $messages = document.querySelector('#messages');
 
-socket.on('message', (msg) => {
-    console.log(msg);
+// Templates
+const messageTemplate = document.querySelector('#message-template').innerHTML;
+const locationMsgTemplate = document.querySelector('#location-msg-template').innerHTML;
+const sidebarTemplate = document.querySelector('#sidebar-template').innerHTML;
+
+// Options 
+const { username, room } = Qs.parse(location.search, { ignoreQueryPrefix: true });
+
+socket.on('message', ({ username, message, createdAt }) => {
+    //console.log({ username, message, createdAt });
+    const html = Mustache.render(messageTemplate, {
+        username,
+        message,
+        createdAt: moment(createdAt).format('h:mm a')
+    });
+
+    $messages.insertAdjacentHTML('beforeend', html);
 }); 
 
-document.querySelector('#message-form').addEventListener('submit', (e) => {
+socket.on('locationMessage', ({ username, url, createdAt }) => {
+    //console.log({ username, message, createdAt });
+    const html = Mustache.render(locationMsgTemplate, {
+        username,
+        url,
+        createdAt: moment(createdAt).format('h:mm a')
+    });
+
+    $messages.insertAdjacentHTML('beforeend', html);
+})
+
+socket.on('roomData', ({ room, users }) => {
+    console.log(room);
+    console.log(users);
+    const html = Mustache.render(sidebarTemplate, {
+        room,
+        users
+    })
+    document.querySelector('#sidebar').innerHTML = html;
+});
+
+// Event listeners 
+$messageForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    // disable form
+    $messageFormButton.setAttribute('disabled', 'disabled');
+
     const msg = e.target.elements.message.value;
     // console.log('Send: ', msg);
     socket.emit('sendMsg', msg, (error) => {
+        // enable
+        $messageFormButton.removeAttribute('disabled');
+        $messageFormInput.value = '';
+        $messageFormInput.focus();
+
         if (error) {
             return console.log(error);
         }
@@ -19,10 +68,12 @@ document.querySelector('#message-form').addEventListener('submit', (e) => {
     });
 });
 
-document.querySelector('#send-location').addEventListener('click', () => {
+$sendLocationButton.addEventListener('click', () => {
     if (!navigator.geolocation) {
         return alert('Geolocation is not supported by your browser.');
     }
+
+    $sendLocationButton.setAttribute('disabled', 'disabled');
 
     navigator.geolocation.getCurrentPosition(
         position => {
@@ -35,12 +86,21 @@ document.querySelector('#send-location').addEventListener('click', () => {
                 if (error) {
                     return console.log(error);
                 }
+                $sendLocationButton.removeAttribute('disabled');
                 console.log('Location shared!');
             });
         },
         error => {
+            $sendLocationButton.removeAttribute('disabled');
             console.log(error);
         },
         {timeout: 30000, enableHighAccuracy: true, maximumAge: 75000}
     );
+});
+
+socket.emit('join', { username, room }, (error) => {
+    if (error) {
+        alert(error);
+        location.href = '/';
+    }
 });

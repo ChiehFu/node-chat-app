@@ -3,6 +3,8 @@ const path = require('path');
 const http = require('http');
 const socketio = require('socket.io');
 const Filter = require('bad-words');
+const { generateMessage, generateLocationMessage } = require('./utils/messages.js')
+const { addUser, removeUser, getUser, getUserInRoom } = require('./utils/users');
 
 const app = express();
 const server = http.createServer(app);
@@ -13,14 +15,29 @@ const pubilcDir = path.join(__dirname, '../public');
 
 app.use(express.static(pubilcDir));
 
-let count = 0;
-
 io.on('connection', (socket) => {
-    // console.log('New Websocket connection');
-    socket.emit('message', 'Welcome!');
-    socket.broadcast.emit('message', 'A new user has joined!')
+    console.log('New Websocket connection');
+    
+    // User joins
+    socket.on('join', (options, callback) => {
+        const { error, user } = addUser({ id: socket.id, ...options });
+        
+        if (error) {
+            return callback(error);
+        }
 
+        socket.join(user.room);
 
+        socket.emit('message', generateMessage('Admin', 'Welcome!'));
+        socket.broadcast.to(user.room).emit('message', generateMessage('Admin', `${user.username} has joined!`));
+        io.to(user.room).emit('roomData', {
+            room: user.room,
+            users: getUserInRoom(user.room)
+        });
+        callback();
+    });
+
+    // User sends message
     socket.on('sendMsg', (msg, callback) => {
         //console.log('Received :', msg);
         const filter = new Filter();
@@ -28,19 +45,30 @@ io.on('connection', (socket) => {
         if (filter.isProfane(msg)) {
             return callback('Profanity is not allowed!');
         }
+        const user = getUser(socket.id);
 
-        io.emit('message', msg);
+        io.to(user.room).emit('message', generateMessage(user.username, msg));
         callback();
     });
 
+    // User sends location
     socket.on('sendLocation', ({latitude, longitude}, callback) => {
+        const user = getUser(socket.id);
         const url = 'https://google.com/maps?q=';
-        io.emit('message', `${url}${latitude},${longitude}`);
+        io.to(user.room).emit('locationMessage', generateLocationMessage(user.username, `${url}${latitude},${longitude}`));
         callback();
     });
 
     socket.on('disconnect', () => {
-        io.emit('message', 'A user has left!');
+        const user = removeUser(socket.id);
+
+        if (user) {
+            io.to(user.room).emit('message', generateMessage('Admin', `${user.username} has left!`));
+            io.to(user.room).emit('roomData', {
+                room: user.room,
+                users: getUserInRoom(user.room)
+            });
+        }
     });
 });
 
